@@ -1,4 +1,4 @@
-# Written by Genna
+# Written by Genna, modified by Wybxc
 
 # Windows Package Manager
 export extern winget [
@@ -32,7 +32,22 @@ export extern "winget install" [
     --help(-?): bool # Display the help for this command
 ]
 
-def "winget show" [
+# export extern "winget search" [
+#     query?: string # The query used to search for a package
+#     --query(-q): string # The query used to search for a package
+#     --id: string, # 按 id 筛选结果
+#     --name: string, # 按名称筛选结果
+#     --moniker: string, # 按名字对象筛选结果
+#     --tag: string, # 按标签筛选
+#     --command: string, # 按命令筛选结果
+#     --source(-s): string, # 使用指定的源查找程序包
+#     --count(-n): number, # 显示的指定数量的结果(介于 1 和 1000 之间)
+#     --exact(-e): string, # 使用精确匹配查找程序包
+#     --header: string, # 可选的 Windows-Package-Manager REST 源 HTTP 标头
+#     --accept-source-agreements : string, #在源操作期间接受所有源协议
+# ]
+
+export def "winget show" [
     pos_query?: string,
     --query(-q): string, # The query used to search for a package
     --id: string, # Filter results by id
@@ -114,7 +129,7 @@ export extern "winget source add" [
 ]
 
 # List current sources
-def "winget source list" [
+export def "winget source list" [
     pos_name?: string, # Name of the source
     --name(-n): string, # Name of the source
     --raw: bool, # Output the raw CLI output instead of structured data
@@ -167,7 +182,7 @@ export extern "winget source export" [
 ]
 
 # Find and show basic info of packages
-def "winget search" [
+export def "winget search" [
     pos_query?: string,
     --query(-q): string, # The query used to search for a package
     --id: string, # Filter results by id
@@ -215,7 +230,7 @@ def "winget search" [
 }
 
 # Display installed packages in a structured way.
-def "winget list" [
+export def "winget list" [
     pos_query?: string,
     --query(-q): string, # The query used to search for a package
     --id: string, # Filter results by id
@@ -234,7 +249,6 @@ def "winget list" [
     let flagify = { |name, value| nu-complete winget flagify $name $value }
 
     let command = ([
-        "winget list"
         $pos_query,
         (do $flagify query $query)
         (do $flagify id $id)
@@ -248,12 +262,14 @@ def "winget list" [
         (do $flagify header $header)
         (do $flagify accept_source_agreements $accept_source_agreements)
         (do $flagify help $help)
-    ] | str collect ' ')
+    ] | str join ' ' | str trim)
+
+    let result = (^winget "list" $command)
 
     if $help || $raw {
-        ^$command
+        $result
     } else {
-        let output = (^$command | lines)
+        let output = ($result | lines)
         if ($output | length) == 1 {
             $"(ansi light_red)($output | first)(ansi reset)"
         } else {
@@ -430,7 +446,7 @@ def "nu-complete winget install id" [] {
 def "nu-complete winget parse table" [lines: any] {
     let header = (
         $lines | first
-        | parse -r '(?P<name>Name\s+)(?P<id>Id\s+)(?P<version>Version\s+)?(?P<available>Available\s+)?(?P<source>Source\s*)?'
+        | parse -r '(?P<name>\w+\s+)(?P<id>\w+\s+)(?P<version>\w+\s+)?(?P<available>\w+\s+)?(?P<source>\w+\s*)?'
         | first
     )
     let lengths = {
