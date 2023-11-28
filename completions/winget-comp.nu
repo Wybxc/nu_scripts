@@ -1,4 +1,129 @@
-# Written by Genna, modified by Wybxc
+# Written by Genna
+
+def "nu-complete winget install locale" [] {
+    [
+        "ar-SA","bn-BD","bn-IN","cs-CZ","da-DK","de-AT","de-CH","de-DE","el-GR",
+        "en-AU","en-CA","en-GB","en-IE","en-IN","en-NZ","en-US","en-ZA","es-AR",
+        "es-CL","es-CO","es-ES","es-MX","es-US","fi-FI","fr-BE","fr-CA","fr-CH",
+        "fr-FR","he-IL","hi-IN","hu-HU","id-ID","it-CH","it-IT","jp-JP","ko-KR",
+        "nl-BE","nl-NL","no-NO","pl-PL","pt-BR","pt-PT","ro-RO","ru-RU","sk-SK",
+        "sv-SE","ta-IN","ta-LK","th-TH","tr-TR","zh-CN","zh-HK","zh-TW"
+    ]
+}
+
+def "nu-complete winget install source" [] {
+    ^winget source list | lines | skip 2 | split column ' ' | get column1
+}
+
+def "nu-complete winget install scope" [] {
+    ["user", "machine"]
+}
+
+def "nu-complete winget source type" [] {
+    ["Microsoft.PreIndexed.Package"]
+}
+
+def "nu-complete winget flagify" [name: string, value: any, --short(-s): bool] {
+  let flag_start = if $short { '-' } else { '--' }
+  if $value == $nothing or $value == false {
+    ""
+  } else if $value == true {
+    $"($flag_start)($name)"
+  } else {
+    $"($flag_start)($name) ($value)"
+  }
+}
+
+def "nu-complete winget uninstall package id" [] {
+    ^winget export -s winget -o __winget-temp__.json | ignore
+    let results = (open __winget-temp__.json | get Sources.Packages | first | get PackageIdentifier)
+    rm __winget-temp__.json | ignore
+    $results
+}
+
+def "nu-complete winget uninstall package name" [] {
+    winget list | get name | str trim | str replace "…" "..."
+}
+
+def "nu-complete winget install name" [] {
+    let path = ($env.TMP | path join winget-packages.csv)
+
+    let completions = if ($path | path exists) and (ls $path | first | get modified | ((date now) - $in) < 1day) {
+        open $path | get name | each { |it| $"(char dq)($it)(char dq)" } | str replace "…" ""
+    } else {
+        # Chinese characters break parsing, filter broken entries with `where source == winget`
+        let data = (winget search | where source == winget | select name id)
+        $data | save $path | ignore
+        $data | get name | each { |it| $"(char dq)($it)(char dq)" } | str replace "…" ""
+    }
+    {
+        completions: $completions
+        options: {
+            case_sensitive: false
+            positional: false
+        }
+    }
+}
+
+def "nu-complete winget install id" [] {
+    let path = ($env.TMP | path join winget-packages.csv)
+
+    if ($path | path exists) and (ls $path | first | get modified | ((date now) - $in) < 1day) {
+        open $path | get id | str replace "…" ""
+    } else {
+        # Chinese characters break parsing, filter broken entries with `where source == winget`
+        let data = (winget search | where source == winget | select name id)
+        $data | save $path | ignore
+        $data | get id | str replace "…" ""
+    }
+}
+
+def "nu-complete winget parse table" [lines: any] {
+    let header = (
+        $lines | first
+        | parse -r '(?P<name>Name\s+)(?P<id>Id\s+)(?P<version>Version\s+)?(?P<available>Available\s+)?(?P<source>Source\s*)?'
+        | first
+    )
+    let lengths = {
+        name: ($header.name | str length),
+        id: ($header.id | str length),
+        version: ($header.version | str length),
+        available: ($header.available | str length),
+        source: ($header.source | str length)
+    }
+    $lines | skip 2 | each { |it|
+        let it = ($it | split chars)
+
+        let version = if $lengths.version > 0 {
+            (
+                $it | skip ($lengths.name + $lengths.id)
+                | first $lengths.version | str join | str trim
+            )
+        } else { "" }
+
+        let available = if $lengths.available > 0 {
+            (
+                $it | skip ($lengths.name + $lengths.id + $lengths.version)
+                | first $lengths.available | str join | str trim
+            )
+        } else { "" }
+
+        let source = if $lengths.source > 0 {
+            (
+                $it | skip ($lengths.name + $lengths.id + $lengths.version + $lengths.available)
+                | str join | str trim
+            )
+        } else { "" }
+
+        {
+            name: ($it | first $lengths.name | str join | str trim),
+            id: ($it | skip $lengths.name | first $lengths.id | str join | str trim),
+            version: $version,
+            available: $available,
+            source: $source
+        }
+    }
+}
 
 # Windows Package Manager
 export extern winget [
@@ -32,22 +157,7 @@ export extern "winget install" [
     --help(-?): bool # Display the help for this command
 ]
 
-# export extern "winget search" [
-#     query?: string # The query used to search for a package
-#     --query(-q): string # The query used to search for a package
-#     --id: string, # 按 id 筛选结果
-#     --name: string, # 按名称筛选结果
-#     --moniker: string, # 按名字对象筛选结果
-#     --tag: string, # 按标签筛选
-#     --command: string, # 按命令筛选结果
-#     --source(-s): string, # 使用指定的源查找程序包
-#     --count(-n): number, # 显示的指定数量的结果(介于 1 和 1000 之间)
-#     --exact(-e): string, # 使用精确匹配查找程序包
-#     --header: string, # 可选的 Windows-Package-Manager REST 源 HTTP 标头
-#     --accept-source-agreements : string, #在源操作期间接受所有源协议
-# ]
-
-export def "winget show" [
+def "winget show" [
     pos_query?: string,
     --query(-q): string, # The query used to search for a package
     --id: string, # Filter results by id
@@ -94,9 +204,9 @@ export def "winget show" [
         (do $flagify header $header)
         (do $flagify accept_source_agreements $accept_source_agreements)
         (do $flagify help $help)
-    ] | str collect ' ')
+    ] | str join ' ')
 
-    if $raw || $help {
+    if $raw or $help {
         ^$command
     } else {
         let output = (^$command | lines)
@@ -107,8 +217,8 @@ export def "winget show" [
             $"(ansi yellow)($output | first | str trim)(ansi reset)"
         } else {
             let header = ($output | first | parse -r 'Found (?P<Name>.+) \[(?P<Id>.+)\]')
-            let manifest = ($output | skip 1 | str collect (char newline) | from yaml)
-            $header | first | merge { $manifest }
+            let manifest = ($output | skip 1 | str join (char newline) | from yaml)
+            $header | first | merge {|| $manifest }
         }
     }
 }
@@ -129,7 +239,7 @@ export extern "winget source add" [
 ]
 
 # List current sources
-export def "winget source list" [
+def "winget source list" [
     pos_name?: string, # Name of the source
     --name(-n): string, # Name of the source
     --raw: bool, # Output the raw CLI output instead of structured data
@@ -142,9 +252,9 @@ export def "winget source list" [
         $pos_name
         (do $flagify name $name)
         (do $flagify help $help)
-    ] | str collect ' ')
+    ] | str join ' ')
 
-    if $raw || $help {
+    if $raw or $help {
         ^$command
     } else {
         let output = (^$command | lines)
@@ -182,7 +292,7 @@ export extern "winget source export" [
 ]
 
 # Find and show basic info of packages
-export def "winget search" [
+def "winget search" [
     pos_query?: string,
     --query(-q): string, # The query used to search for a package
     --id: string, # Filter results by id
@@ -215,9 +325,9 @@ export def "winget search" [
         (do $flagify header $header)
         (do $flagify accept_source_agreements $accept_source_agreements)
         (do $flagify help $help)
-    ] | str collect ' ')
+    ] | str join ' ')
 
-    if $raw || $help {
+    if $raw or $help {
         ^$command
     } else {
         let output = (^$command | lines)
@@ -230,7 +340,7 @@ export def "winget search" [
 }
 
 # Display installed packages in a structured way.
-export def "winget list" [
+def "winget list" [
     pos_query?: string,
     --query(-q): string, # The query used to search for a package
     --id: string, # Filter results by id
@@ -249,6 +359,7 @@ export def "winget list" [
     let flagify = { |name, value| nu-complete winget flagify $name $value }
 
     let command = ([
+        "winget list"
         $pos_query,
         (do $flagify query $query)
         (do $flagify id $id)
@@ -262,14 +373,12 @@ export def "winget list" [
         (do $flagify header $header)
         (do $flagify accept_source_agreements $accept_source_agreements)
         (do $flagify help $help)
-    ] | str join ' ' | str trim)
+    ] | str join ' ')
 
-    let result = (^winget "list" $command)
-
-    if $help || $raw {
-        $result
+    if $help or $raw {
+        ^$command
     } else {
-        let output = ($result | lines)
+        let output = (^$command | lines)
         if ($output | length) == 1 {
             $"(ansi light_red)($output | first)(ansi reset)"
         } else {
@@ -364,128 +473,3 @@ export extern "winget import" [
     --accept_package_agreements: bool, # Accept all licence agreements for packages
     --accept_source_agreements: bool # Accept all source agreements during source operations
 ]
-
-def "nu-complete winget install locale" [] {
-    [
-        "ar-SA","bn-BD","bn-IN","cs-CZ","da-DK","de-AT","de-CH","de-DE","el-GR",
-        "en-AU","en-CA","en-GB","en-IE","en-IN","en-NZ","en-US","en-ZA","es-AR",
-        "es-CL","es-CO","es-ES","es-MX","es-US","fi-FI","fr-BE","fr-CA","fr-CH",
-        "fr-FR","he-IL","hi-IN","hu-HU","id-ID","it-CH","it-IT","jp-JP","ko-KR",
-        "nl-BE","nl-NL","no-NO","pl-PL","pt-BR","pt-PT","ro-RO","ru-RU","sk-SK",
-        "sv-SE","ta-IN","ta-LK","th-TH","tr-TR","zh-CN","zh-HK","zh-TW"
-    ]
-}
-
-def "nu-complete winget install source" [] {
-    ^winget source list | lines | skip 2 | split column ' ' | get column1
-}
-
-def "nu-complete winget install scope" [] {
-    ["user", "machine"]
-}
-
-def "nu-complete winget source type" [] {
-    ["Microsoft.PreIndexed.Package"]
-}
-
-def "nu-complete winget flagify" [name: string, value: any, --short(-s): bool] {
-  let flag_start = if $short { '-' } else { '--' }
-  if $value == $nothing || $value == false {
-    ""
-  } else if $value == true {
-    $"($flag_start)($name)"
-  } else {
-    $"($flag_start)($name) ($value)"
-  }
-}
-
-def "nu-complete winget uninstall package id" [] {
-    ^winget export -s winget -o __winget-temp__.json | ignore
-    let results = (open __winget-temp__.json | get Sources.Packages | first | get PackageIdentifier)
-    rm __winget-temp__.json | ignore
-    $results
-}
-
-def "nu-complete winget uninstall package name" [] {
-    winget list | get name | str trim | str replace "…" "..."
-}
-
-def "nu-complete winget install name" [] {
-    let path = ($env.TMP | path join winget-packages.csv)
-
-    let completions = if ($path | path exists) && (ls $path | first | get modified | ((date now) - $in) < 1day) {
-        open $path | get name | each { |it| $"(char dq)($it)(char dq)" } | str replace "…" ""
-    } else {
-        # Chinese characters break parsing, filter broken entries with `where source == winget`
-        let data = (winget search | where source == winget | select name id)
-        $data | save $path | ignore
-        $data | get name | each { |it| $"(char dq)($it)(char dq)" } | str replace "…" ""
-    }
-    {
-        completions: $completions
-        options: {
-            case_sensitive: false
-            positional: false
-        }
-    }
-}
-
-def "nu-complete winget install id" [] {
-    let path = ($env.TMP | path join winget-packages.csv)
-
-    if ($path | path exists) && (ls $path | first | get modified | ((date now) - $in) < 1day) {
-        open $path | get id | str replace "…" ""
-    } else {
-        # Chinese characters break parsing, filter broken entries with `where source == winget`
-        let data = (winget search | where source == winget | select name id)
-        $data | save $path | ignore
-        $data | get id | str replace "…" ""
-    }
-}
-
-def "nu-complete winget parse table" [lines: any] {
-    let header = (
-        $lines | first
-        | parse -r '(?P<name>\w+\s+)(?P<id>\w+\s+)(?P<version>\w+\s+)?(?P<available>\w+\s+)?(?P<source>\w+\s*)?'
-        | first
-    )
-    let lengths = {
-        name: ($header.name | str length),
-        id: ($header.id | str length),
-        version: ($header.version | str length),
-        available: ($header.available | str length),
-        source: ($header.source | str length)
-    }
-    $lines | skip 2 | each { |it|
-        let it = ($it | split chars)
-
-        let version = if $lengths.version > 0 {
-            (
-                $it | skip ($lengths.name + $lengths.id)
-                | first $lengths.version | str collect | str trim
-            )
-        } else { "" }
-
-        let available = if $lengths.available > 0 {
-            (
-                $it | skip ($lengths.name + $lengths.id + $lengths.version)
-                | first $lengths.available | str collect | str trim
-            )
-        } else { "" }
-
-        let source = if $lengths.source > 0 {
-            (
-                $it | skip ($lengths.name + $lengths.id + $lengths.version + $lengths.available)
-                | str collect | str trim
-            )
-        } else { "" }
-
-        {
-            name: ($it | first $lengths.name | str collect | str trim),
-            id: ($it | skip $lengths.name | first $lengths.id | str collect | str trim),
-            version: $version,
-            available: $available,
-            source: $source
-        }
-    }
-}

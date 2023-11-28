@@ -1,4 +1,13 @@
 # Run an executable in a conda environment.
+
+def 'nu-complete conda envs' [] {
+  ^conda info --envs
+  | lines
+  | where not ($it | str starts-with '#')
+  | where not ($it | is-empty)
+  | each {|entry| $entry | split row ' ' | get 0 }
+}
+
 export extern "conda run" [
   executable_call: string                      # Executable name, with additional arguments to be passed to the executable on invocation.
   --name(-n): string@'nu-complete conda envs'  # Name of the environment to run the command in.
@@ -10,11 +19,3 @@ export extern "conda run" [
   --no-capture-output                          # Do not capture output from the executable.
   --live-stream                                # Display the output for the subprocess stdout and stderr on real time.
 ]
-
-def 'nu-complete conda envs' [] {
-  ^conda info --envs
-  | lines
-  | where not ($it | str starts-with '#')
-  | where not ($it | is-empty)
-  | each {|entry| $entry | split row ' ' | get 0 }
-}
